@@ -44,44 +44,79 @@ class HandDetector:
         self.lmList = []
 
         if self.results and self.results.multi_hand_landmarks:
-            myHand = self.results.multi_hand_landmarks[handNo]
-
-            for id, lm in enumerate(myHand.landmark):
-                h, w, c = img.shape
-                cx, cy = int(lm.x * w), int(lm.y * h)
-                self.lmList.append([id, cx, cy])
+            if handNo < len(self.results.multi_hand_landmarks):
+                myHand = self.results.multi_hand_landmarks[handNo]
+                for id, lm in enumerate(myHand.landmark):
+                    h, w, c = img.shape
+                    cx, cy = int(lm.x * w), int(lm.y * h)
+                    self.lmList.append([id, cx, cy])
 
         return self.lmList
 
-    def recognize_gesture(self):
+    def _get_fingers(self):
+        """
+        Возвращает список [большой, указ., средний, безымян., мизинец]
+        1 = разогнут, 0 = согнут.
+        """
         if not self.lmList:
-            return "unknown"
+            return None
 
         fingers = []
 
-        # Большой палец
+        # Большой палец: сравниваем по X (зеркально для правой руки)
         if self.lmList[4][1] > self.lmList[3][1]:
             fingers.append(1)
         else:
             fingers.append(0)
 
-        # Остальные пальцы
+        # Остальные 4 пальца: кончик выше PIP-сустава → разогнут
         tips = [8, 12, 16, 20]
         pips = [6, 10, 14, 18]
-
         for tip, pip in zip(tips, pips):
-            if self.lmList[tip][2] < self.lmList[pip][2]:
-                fingers.append(1)
-            else:
-                fingers.append(0)
+            fingers.append(1 if self.lmList[tip][2] < self.lmList[pip][2] else 0)
 
-        if fingers == [0, 0, 0, 0, 0]:
+        return fingers
+
+    def recognize_gesture(self):
+        """
+        Возвращает:
+          'neutral'  — ☝️ один указательный (нейтральное/базовое положение)
+          'rock'     — ✊ кулак
+          'scissors' — ✌️ указательный + средний
+          'paper'    — 🖐️ все пальцы
+          'unknown'  — что-то непонятное
+
+        Нейтральный жест (☝️) распознаётся в том числе из любого положения.
+        """
+        fingers = self._get_fingers()
+        if fingers is None:
+            return "unknown"
+
+        thumb, idx, mid, ring, pinky = fingers
+
+        # Нейтральный жест: только указательный поднят (☝️)
+        # Большой палец и остальные — сжаты (не учитываем большой)
+        if idx == 1 and mid == 0 and ring == 0 and pinky == 0:
+            return "neutral"
+
+        # Камень (✊): все 4 пальца (без большого) сжаты
+        if idx == 0 and mid == 0 and ring == 0 and pinky == 0:
             return "rock"
 
-        if fingers[1:] == [1, 1, 1, 1]:
-            return "paper"
-
-        if fingers == [0, 1, 1, 0, 0]:
+        # Ножницы (✌️): указательный + средний подняты, безымянный и мизинец сжаты
+        if idx == 1 and mid == 1 and ring == 0 and pinky == 0:
             return "scissors"
 
+        # Бумага (🖐️): все 4 пальца (без большого) подняты
+        if idx == 1 and mid == 1 and ring == 1 and pinky == 1:
+            return "paper"
+
+        # Доп. распознавание: бумага с большим пальцем (все 5)
+        if thumb == 1 and idx == 1 and mid == 1 and ring == 1 and pinky == 1:
+            return "paper"
+
         return "unknown"
+
+    def is_neutral(self):
+        """Возвращает True, если текущий жест — нейтральный (☝️)."""
+        return self.recognize_gesture() == "neutral"
